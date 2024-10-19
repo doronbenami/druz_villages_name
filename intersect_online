@@ -1,0 +1,55 @@
+import arcpy
+from arcgis.gis import GIS
+import pandas as pd
+
+# Initialize GIS connection (assuming you're already logged in)
+gis = GIS("home")
+
+# Search and retrieve the actual feature layer URL for 'שכבת איתורים'
+iturim_item = gis.content.search("שכבת איתורים", item_type="Feature Layer")[0]
+iturim_layer = iturim_item.layers[0].url  # Get the correct URL of the feature layer
+
+# Local paths and variables
+tama35_url = r"C:/python train/python train.gdb/בעלויות"
+output_intersect = r'C:/python train/python train.gdb/DD'
+excel_path = r"C:/python train/evaluation.xlsx"
+sheet_name = "Sheet1"  # Update this to your specific sheet name if necessary
+
+# Delete the output feature class if it already exists
+if arcpy.Exists(output_intersect):
+    arcpy.management.Delete(output_intersect)
+
+# Perform the intersect using arcpy
+arcpy.analysis.Intersect([iturim_layer, tama35_url], output_intersect)
+
+# Add the 'percent' field to the output intersect
+arcpy.management.AddField(output_intersect, "percent", "DOUBLE")
+
+# Calculate the percentage overlap using the formula 100 * (!Shape_Area! / !shapearea!)
+with arcpy.da.UpdateCursor(output_intersect, ["Shape_Area", "shapearea", "percent"]) as cursor:
+    for row in cursor:
+        # Ensure the total area is not zero to avoid division errors
+        if row[1] > 0:
+            overlap_percent = 100 * (row[0] / row[1])
+        else:
+            overlap_percent = 0  # Set to 0 if total area is zero
+
+        row[2] = overlap_percent
+        cursor.updateRow(row)
+
+# Transfer the columns "מספר_איתור1" and "percent" to the Excel sheet
+fields = ["מספר_איתור1", "percent"]
+data = []
+
+with arcpy.da.SearchCursor(output_intersect, fields) as cursor:
+    for row in cursor:
+        data.append(row)
+
+# Convert the data to a Pandas DataFrame
+df = pd.DataFrame(data, columns=["מספר_איתור1", "percent"])
+
+# Load the Excel file and append the data to the specified sheet
+with pd.ExcelWriter(excel_path, mode='a', if_sheet_exists="overlay") as writer:
+    df.to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=0, startcol=0)
+
+print(f"Data successfully exported to {excel_path}")
